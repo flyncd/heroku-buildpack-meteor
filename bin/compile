@@ -14,6 +14,10 @@ echo "Installing meteor"
 
 # Using different folder to prevent install script form deleting packages file
 curl https://install.meteor.com | /bin/sh
+PATH=$PATH:~/.meteor
+export PATH
+ls -la
+pwd
 echo "Meteor installed"
 
 
