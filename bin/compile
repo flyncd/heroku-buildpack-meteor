@@ -4,60 +4,43 @@ echo "ARGS to: $0 $*"
 BUILD_DIR=$1
 CACHE_DIR=$2
 
-echo "`ls -l $BUILD_DIR`"
-
-METEOR_HOME=$BUILD_DIR/.meteor/local
-PATH=$METEOR_HOME/usr/bin:$METEOR_HOME/usr/lib/meteor/bin:$PATH
-
-METEOR_VERSION=blaze-rc0
-
-fetch_meteor() {
-  if [ -f "$METEOR_HOME/usr/bin/meteor" ] ; then
-    # Skip if meteor is already fetched
-    return
-  fi
-
-  eval $(curl install.meteor.com | grep '^VERSION=')
-  PACKAGE=meteor_${METEOR_VERSION}-1_amd64.deb
-
-#  echo "Fetching meteor deb package"
-#  curl -o "$CACHE_DIR/$PACKAGE" "http://d3sqy0vbqsdhku.cloudfront.net/${PACKAGE}"
-#  echo "`ls -l $CACHE_DIR/$PACKAGE`"
-  echo 'Installing Meteor'
-  echo "`curl https://install.meteor.com/ | sh 2>&1`" || echo FAIL
-
-#  echo "Unpacking meteor to $METEOR_HOME from $CACHE_DIR/$PACKAGE"
-#  [ ! -d "$METEOR_HOME" ] && mkdir -p "$METEOR_HOME"
-#  ar -p "$CACHE_DIR/$PACKAGE" data.tar.gz | tar -C "$METEOR_HOME" -zxf -
+function mktmpdir() {
+  dir=$(mktemp -t node-$1-XXXX)
+  rm -rf $dir
+  mkdir -p $dir
+  echo $dir
 }
 
-build() {
-  ( 
-    cd $BUILD_DIR
-    echo "Creating scrach meteor app in `pwd`/scratch_app"
-    echo "`${HOME}/.meteor/tools/latest/launch-meteor create scratch_app`" || echo FAIL
-echo "`find ./scratch_app/ -type f`"
-    echo "Copying .meteor into our app"
-    mv scratch_app/.meteor . #; rm -rf scratch_app
-echo "`find . -type f`"
-    echo "Building meteor bundle"
-    echo "`${HOME}/.meteor/tools/latest/launch-meteor bundle $CACHE_DIR/bundle.tar.gz 2>&1`" || echo FAIL
-echo "`ls -l $CACHE_DIR`"
-    echo "Making Meteor/local/build"
-    mkdir -p $BUILD_DIR/.meteor/local/build
-    echo "unzipping app bundle"
-    tar -zxf $CACHE_DIR/bundle.tar.gz --strip-components 1 -C $BUILD_DIR/.meteor/local/build || echo FAIL
-    echo "removing bundle archive"
-    rm $CACHE_DIR/bundle.tar.gz
-    echo "build-pack done"
-  )
+function indent() {
+  c='s/^/       /'
+  case $(uname) in
+    Darwin) sed -l "$c";;
+    *)      sed -u "$c";;
+  esac
 }
 
-[ ! -d $BUILD_DIR ] && mkdir $BUILD_DIR
-[ ! -d $CACHE_DIR ] && mkdir $CACHE_DIR
+METEOR_BUILD_DIR="$BUILD_DIR/.meteor/heroku_build"
+mkdir -p "$HOME"
 
-fetch_meteor
-build
 
-echo "in meteor: $METEOR_HOME"
-echo "`find $METEOR_HOME -type f -name node`"
+cd $BUILD_DIR
+echo "Installing meteor" | indent
+
+# Using different folder to prevent install script form deleting packages file
+VENDORED_METEOR="$(mktmpdir meteor)"
+curl https://install.meteor.com | HOME="$VENDORED_METEOR" /bin/sh | indent
+echo "Meteor installed" | indent
+
+
+echo "Building meteor bundle" | indent
+HOME="$VENDORED_METEOR" "$VENDORED_METEOR"/.meteor/meteor bundle "$CACHE_DIR"/bundle.tar.gz 2>&1 | indent
+
+mkdir -p "$METEOR_BUILD_DIR"/app
+tar -zxf "$CACHE_DIR"/bundle.tar.gz --strip-components 1 -C "$METEOR_BUILD_DIR"/app
+rm "$CACHE_DIR"/bundle.tar.gz
+
+
+# vendor node into the slug
+PATH="$METEOR_BUILD_DIR/bin:$PATH"
+echo "-----> Vendoring node into slug"
+mkdir -p "$METEOR_BUILD_DIR/bin"
